@@ -1,0 +1,10 @@
+install.packages("e1071")
+library("e1071")
+
+
+callprice <- function(S,K,r,sigma,t){
+  d1 = (log(S/K) + (r + 1/2 * sigma ^ 2) * t) / (sigma * sqrt(t))
+  d2 = d1 - sigma * sqrt(t)
+  callprice = S * pnorm(d1) - K * exp(-r*t) * pnorm(d2)
+  return(callprice)
+}
