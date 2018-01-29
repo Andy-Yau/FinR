@@ -5,3 +5,12 @@ for (i in c(1:110)){
 }
 
 plot(plotrix)
+
+# the following code is for generalization, but is bugged: subscript out of bounds
+
+plotrix = matrix()
+for (i in c(1:100)){
+  for (j in c(100:120)){
+  plotrix[i,j] = callprice(i,j,0.02,0.1,2)
+  }
+}
