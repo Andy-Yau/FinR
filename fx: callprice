@@ -1,7 +1,6 @@
-install.packages("e1071")
 library("e1071")
 
-
+# calculate call price by BS formula
 callprice <- function(S,K,r,sigma,t){
   d1 = (log(S/K) + (r + 1/2 * sigma ^ 2) * t) / (sigma * sqrt(t))
   d2 = d1 - sigma * sqrt(t)
