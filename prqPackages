@@ -1,0 +1,3 @@
+if(require('e1071') == FALSE){
+  install.packages('e1071')
+}
