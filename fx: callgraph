@@ -1,0 +1,13 @@
+# graph plot callprice against stock price
+callgraph.S <- function(K,r,sigma,t){
+  plotrix = matrix()
+  for (i in c(1:110)){
+    plotrix[i] = callprice(i,K,r,sigma,t)
+  }
+  lines(plotrix)
+}
+
+# map plot callprice against stock price w.r.t strike price
+for(i in c(100:120)){
+  callgraph.S(i, 0.02, 0.2, 2)
+}
