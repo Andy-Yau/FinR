@@ -1,0 +1,33 @@
+#dim matrix
+dv <- matrix()
+v <- matrix()
+dS <- matrix()
+S <- matrix()
+
+#dim variables
+k     <- 0.01
+theta <- 0.2
+xi    <- 0.01
+T     <- 1
+dt    <- T/360
+mu    <- 0.08
+
+#initialize
+v[1] = 0.01
+S[1] = 100
+
+#trials
+for (j in 1:1){
+  #steps
+  for (i in 1:100){
+    #volatility process
+    dv[i] = k*(theta - v[i])*dt + xi*sqrt(v[i])*sqrt(T)*rnorm(1)
+    #update simulated volatility for next period
+    v[i+1] <- v[i] + dv[i]
+    #stock price process
+    dS[i] = mu*S[i]*dt + sqrt(v[i])*S[i]*sqrt(T)*rnorm(1)
+    #update simulated stock price for next period
+    S[i+1] <- S[i] + dS[i]
+  }
+  plot(S)
+}
