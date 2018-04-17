@@ -1,0 +1,78 @@
+# CONTACTS
+# Andy Yau C H
+# andyyau@connect.hku.hk
+
+# DESCRIPTIONS
+# FinEng Project
+# FX Capital Guarantee pricing
+
+### DOCUMENTATION (code at bottom) ###
+
+
+  #   The exchange rate model adopted is basic Vasicek model
+  #   dr(t) = kappa*(b - r(t))*dt + sigma*dW(t)
+  #
+  #   http://www.math.ku.dk/~rolf/teaching/mfe04/MathFin.Vasicekestimation.R
+  #   
+  #   AUXILIARY ESTIMATORS:
+  #   alpha = {(n*SUM[r(i+1)*r(i)]) - SUM[r(i+1)]*SUM[r(i)]} / {n*SUM[r(i)^2]-[{SUM[r(i)]]^2}
+  #   beta = (1/n)*(alpha*SUM[r(i)] - SUM[r(i+1)])
+  #
+  #   MODEL ESTIMATORS
+  #   alpha = exp(-a*dt)
+  #   beta = b*[1-exp(-a*dt)] = b*(1-a)
+  #
+  #   Rates Notations (pr, cd, rf):
+  #
+  #   participation rate (pr) is the higher rate the buyer can luckily get
+  #   certificate of deposite rate (cd) is the guaranteed rate if trigger is hit
+  #   risk-free rate (rf) is assumed to be accessible to all parties (incl. buyers)
+  #
+  #   According to the design, we infer pr > cd > rf 
+  #   (the last inequality might not hold, give rising to variants)
+
+### MAIN CODE ###
+
+library("quantmod")
+rate <- matrix()
+PF <- matrix()    # payoff vector
+indicator <- 1    # 0 if trigger is hit; 1 otherwise
+
+# inputs
+I <- 100000       # base capital deposit
+K <- 7.50         # trigger/strike rate
+pr <- 0.05        # participation rate
+cd <- 0.02        # CD rate (i.e. guaranteed rate)
+rf <- 0.005       # risk-free rate
+trials <- 1000    # number of trial runs
+
+# data retrieval (seems OANDA has failed)
+  # obs <- getFX("USD/CNY", from = "2018-01-01", auto.assign = FALSE)
+data = obs[,2]
+data.lag = obs[-1,2]
+
+# parameter estimation
+b <- (sum(data*data.lag)-sum(data)*sum(data.lag)/N)/(sum(data.lag^2)-(sum(data.lag)^2/N))
+kappa <- -log(b)/dt
+a <- sum(data)/N - b*sum(data.lag)/N
+theta <- a/(1-b)
+sigma <- sqrt(2*kappa*(sum((data-data.lag*b-a)^2)/N)/(1-b^2))
+
+# product valuation
+rate[0] <- data[1]
+for (j in 1:trials){
+  # exchange rate evolution
+  for (i in 1:100){
+    rate[i+1] = rate[i] + kappa*(b-rate[i])*dt + sigma*sqrt(dt)*rnorm(1)
+    if (rate[i+1] > K) {indicator = 0}
+  }
+  # contract payoff
+  if (indicator == 0){
+    PF[j] <- I * (1 + pr)
+  } else {
+    PF[j] <- I * (1 + cd)
+  }
+}
+PF.mean <- mean(PF[j])
+  
+
