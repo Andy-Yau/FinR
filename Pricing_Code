@@ -1,10 +1,6 @@
-# CONTACTS
-# Andy Yau C H
-# andyyau@connect.hku.hk
-
-# DESCRIPTIONS
 # FinEng Project
 # FX Capital Guarantee pricing
+# andyyau@connect.hku.hk
 
 ### DOCUMENTATION (code at bottom) ###
 
@@ -12,21 +8,15 @@
   #   The exchange rate model adopted is basic Vasicek model
   #   dr(t) = kappa*(b - r(t))*dt + sigma*dW(t)
   #
+  #   Estimation of parameters can be found here:
   #   http://www.math.ku.dk/~rolf/teaching/mfe04/MathFin.Vasicekestimation.R
   #   
-  #   AUXILIARY ESTIMATORS:
-  #   alpha = {(n*SUM[r(i+1)*r(i)]) - SUM[r(i+1)]*SUM[r(i)]} / {n*SUM[r(i)^2]-[{SUM[r(i)]]^2}
-  #   beta = (1/n)*(alpha*SUM[r(i)] - SUM[r(i+1)])
-  #
-  #   MODEL ESTIMATORS
-  #   alpha = exp(-a*dt)
-  #   beta = b*[1-exp(-a*dt)] = b*(1-a)
   #
   #   Rates Notations (pr, cd, rf):
   #
-  #   participation rate (pr) is the higher rate the buyer can luckily get
-  #   certificate of deposite rate (cd) is the guaranteed rate if trigger is hit
-  #   risk-free rate (rf) is assumed to be accessible to all parties (incl. buyers)
+  #   - participation rate (pr) is the higher rate the buyer can luckily get
+  #   - certificate of deposite rate (cd) is the guaranteed rate if trigger is hit
+  #   - risk-free rate (rf) is assumed to be accessible to all parties (incl. buyers)
   #
   #   According to the design, we infer pr > cd > rf 
   #   (the last inequality might not hold, give rising to variants)
@@ -36,43 +26,49 @@
 library("quantmod")
 rate <- matrix()
 PF <- matrix()    # payoff vector
-indicator <- 1    # 0 if trigger is hit; 1 otherwise
+PF.mean <- matrix()
 
-# inputs
+# inputs (strike and tenor are to be assigned in the valuation function)
 I <- 100000       # base capital deposit
-K <- 7.50         # trigger/strike rate
 pr <- 0.05        # participation rate
 cd <- 0.02        # CD rate (i.e. guaranteed rate)
-rf <- 0.005       # risk-free rate
+rf <- 0.005       # continuous risk-free rate
+dt <- 1/252       # daily on 252 basis
 trials <- 1000    # number of trial runs
 
 # data retrieval (seems OANDA has failed)
   # obs <- getFX("USD/CNY", from = "2018-01-01", auto.assign = FALSE)
-data = obs[,2]
-data.lag = obs[-1,2]
+dataset <- read.csv(file="E:/YCH USB/HKU QFin/Year 4/Sem 2/financial engineering/Project/CHF_data.csv", header = TRUE)
+data = dataset[-1,5]
+n <- length(data)
+data.lag = dataset[-n,5]
 
 # parameter estimation
-b <- (sum(data*data.lag)-sum(data)*sum(data.lag)/N)/(sum(data.lag^2)-(sum(data.lag)^2/N))
+b <- (sum(data*data.lag)-sum(data)*sum(data.lag)/n)/(sum(data.lag^2)-(sum(data.lag)^2/n))
 kappa <- -log(b)/dt
-a <- sum(data)/N - b*sum(data.lag)/N
+a <- sum(data)/n - b*sum(data.lag)/n
 theta <- a/(1-b)
-sigma <- sqrt(2*kappa*(sum((data-data.lag*b-a)^2)/N)/(1-b^2))
+sigma <- sqrt(2*kappa*(sum((data-data.lag*b-a)^2)/n)/(1-b^2))
 
-# product valuation
-rate[0] <- data[1]
-for (j in 1:trials){
-  # exchange rate evolution
-  for (i in 1:100){
-    rate[i+1] = rate[i] + kappa*(b-rate[i])*dt + sigma*sqrt(dt)*rnorm(1)
-    if (rate[i+1] > K) {indicator = 0}
+# product valuation function
+simulate <- function(strike, tenor){
+  rate[1] <- data[1]
+  for (j in 1:trials){
+    indicator <- 0    # 0 if not hit, 1 if triggered; reset every trial
+    # exchange rate evolution
+    for (i in 1 : tenor/dt){
+      rate[i+1] = rate[i] + kappa*(theta-rate[i])*dt + sigma*sqrt(dt)*rnorm(1)
+      if (rate[i+1] > strike){
+        indicator = indicator + 1 # triggered is hit, recorded by indicator
+      }
+    }
+    # contract payoff
+    if (indicator == 0){
+      PF[j] <- I * (1 + pr) # not triggered, high rate (pr)
+    } else {
+      PF[j] <- I * (1 + cd) # triggered, guaranteed rate (cd)
+    }
+    PF = PF[j]*exp(-rf*tenor) # discounting
   }
-  # contract payoff
-  if (indicator == 0){
-    PF[j] <- I * (1 + pr)
-  } else {
-    PF[j] <- I * (1 + cd)
-  }
+  simulate = mean(PF)
 }
-PF.mean <- mean(PF[j])
-  
-
