@@ -25,11 +25,15 @@
   #   List of functions:
   #   1.  [output] <- simulate([strike, tenor, graph])
   #       Usage: given trigger rate and maturity length, runs MCS and returns mean result
-  #       Graph = 1: graphs rate evolution; Graph = 0: no graph wanted
+  #       Graph variable: 1 = exchange rate graph, 2 = risk-free rate graph, otherwise no graph
   #   2.  strike_to_price()
   #       Usage: graphs the relationship between P (y-axis) and K (x-axis)
   #   3.  strike_to_ratio()
   #       Usage: graphs the relationship between Success Ratio (y-axis) and K (x-axis)
+  #
+  #   Patch History:
+  #   18/4/18 - prototype available on github (Andy)
+  #   19/4/18 - add stochastic process to rf (Andy)
 
 ### MAIN CODE ###
 
@@ -39,40 +43,58 @@ PF <- matrix()     # raw payoff vector
 PF.d <- matrix()   # discounted payoff vector
 PF.mean <- matrix()# mean of PF.d
 ratio <- matrix()  # success ratio (= win.count/trials)
+rf <- matrix()     # HK 10Y Gbond yield evolution vector
 
 # inputs (strike and tenor are to be assigned in the valuation function)
 I <- 100000       # base capital deposit
 pr <- 0.05        # participation rate
 cd <- 0.02        # CD rate (i.e. guaranteed rate)
-rf <- 0.005       # continuous annual risk-free rate
 dt <- 1/252       # discretized daily on 252 basis
 trials <- 1000    # number of trial runs
 
-# data retrieval (seems OANDA has failed)
-  # obs <- getFX("USD/CNY", from = "2018-01-01", auto.assign = FALSE)
-dataset <- read.csv(file="E:/YCH USB/HKU QFin/Year 4/Sem 2/financial engineering/Project/CHF_data.csv", header = TRUE)
-data = dataset[-1,5]
+## data retrieval (seems OANDA has failed) # obs <- getFX("USD/CNY", from = "2018-01-01", auto.assign = FALSE)
+dataset.rate <- read.csv(file="E:/YCH USB/HKU QFin/Year 4/Sem 2/financial engineering/Project/CHF_data.csv", header = TRUE)
+dataset.rf <- read.csv(file="E:/YCH USB/HKU QFin/Year 4/Sem 2/financial engineering/Project/HKRF_data.csv", header = TRUE)
+# USD/CHF data
+data <- dataset.rate[-1,5]
 n <- length(data)
-data.lag = dataset[-n,5]
+data.lag <- dataset.rate[-n,5]
+# HK 10Y GBond data
+data.rf <- dataset.rf[-1,2]
+n.rf <- length(data.rf)
+data.lag.rf <- dataset.rf[-n.rf,2]
 
-# parameter estimation
+## parameter estimation (exchange rate stochastics)
+  #dr(t) = kappa*(theta - r(t))*dt + sigma*dW(t)
 b <- (sum(data*data.lag)-sum(data)*sum(data.lag)/n)/(sum(data.lag^2)-(sum(data.lag)^2/n))
 kappa <- -log(b)/dt
 a <- sum(data)/n - b*sum(data.lag)/n
 theta <- a/(1-b)
 sigma <- sqrt(2*kappa*(sum((data-data.lag*b-a)^2)/n)/(1-b^2))
 
+## parameter estimation (risk-free rate stochastics)
+  #drf(t) = kappa.rf*(theta.rf - rf(t))*dt + sigma.rf*dW(t)
+b.rf <- (sum(data.rf*data.lag.rf)-sum(data.rf)*sum(data.lag.rf)/n.rf)/(sum(data.lag.rf^2)-(sum(data.lag.rf)^2/n.rf))
+kappa.rf <- -log(b.rf)/dt
+a.rf <- sum(data.rf)/n.rf - b.rf*sum(data.lag.rf)/n.rf
+theta.rf <- a.rf/(1-b.rf)
+sigma.rf <- sqrt(2*kappa.rf*(sum((data.rf-data.lag.rf*b.rf-a.rf)^2)/n.rf)/(1-b.rf^2))
+
 # product valuation function
 simulate <- function(strike, tenor, graph){
   # initialize
-  rate[1] <- data[1] # first rate equals first datum
+  rate[1] <- data[1] # first rate equals first datum in data
+  rf[1] <- data.rf[1] # first rf equals first datum in data.rf
   win.count <- 0 # counts how many "wins"
   loss.count <- 0 # counts how many "losses"
   for (j in 1:trials){
     indicator <- 0    # 0 if not hit, 1 if triggered; reset every trial
-    # exchange rate evolution
+    rf.int <- 0       # initialize integral of rf
+    # rate evolution
     for (i in 1 : as.integer(tenor/dt)){
-      rate[i+1] = rate[i] + kappa*(theta-rate[i])*dt + sigma*sqrt(dt)*rnorm(1)
+      rf.int <- rf.int + rf[i]*dt                                               # rf integral
+      rate[i+1] = rate[i] + kappa*(theta-rate[i])*dt + sigma*sqrt(dt)*rnorm(1)  # exchange rate evolution
+      rf[i+1] = rf[i] + kappa.rf*(theta.rf-rf[i])*dt + sigma*sqrt(dt)*rnorm(1)  # rf evolution
       if (rate[i+1] > strike){
         indicator = indicator + 1 # triggered is hit, counted by indicator
       }
@@ -85,7 +107,7 @@ simulate <- function(strike, tenor, graph){
       PF[j] <- I * (1 + cd) # triggered, guaranteed rate (cd)
       loss.count = loss.count + 1
     }
-    PF.d[j] = PF[j]*exp(-rf*tenor) # discounting
+    PF.d[j] = PF[j]*exp(-rf.int) # discounting
   }
   # for validation only
   if(win.count + loss.count != trials){
@@ -96,6 +118,9 @@ simulate <- function(strike, tenor, graph){
   if(graph == 1){
     plot(rate, xlab = 'dt')
     lines(rate)
+  } else if (graph == 2){
+    plot(rf, xlab = 'dt')
+    lines(rf)
   }
   # output
   simulate = list(mean(PF.d), win.count/trials)
