@@ -34,7 +34,9 @@
   #   Patch History:
   #   18/4/18 - prototype available on github (Andy)
   #   19/4/18 - add stochastic process to rf (Andy)
-
+  #   19/4/18 - modify monte carlo trigger rule, use max instead of counting, bug fixed (Steven)
+  
+  
 ### MAIN CODE ###
 
 library("quantmod")
@@ -63,6 +65,7 @@ data.lag <- dataset.rate[-n,5]
 data.rf <- dataset.rf[-1,2]
 n.rf <- length(data.rf)
 data.lag.rf <- dataset.rf[-n.rf,2]
+S <- data[n]
 
 ## parameter estimation (exchange rate stochastics)
   #dr(t) = kappa*(theta - r(t))*dt + sigma*dW(t)
@@ -81,7 +84,7 @@ theta.rf <- a.rf/(1-b.rf)
 sigma.rf <- sqrt(2*kappa.rf*(sum((data.rf-data.lag.rf*b.rf-a.rf)^2)/n.rf)/(1-b.rf^2))
 
 # product valuation function
-simulate <- function(strike, tenor, graph){
+simulate <- function(strike, tenor, sigma, graph = 0, listout = 0){ #added more parameters, so to use for option greeks
   # initialize
   rate[1] <- data[1] # first rate equals first datum in data
   rf[1] <- data.rf[1] # first rf equals first datum in data.rf
@@ -95,12 +98,13 @@ simulate <- function(strike, tenor, graph){
       rf.int <- rf.int + rf[i]*dt                                               # rf integral
       rate[i+1] = rate[i] + kappa*(theta-rate[i])*dt + sigma*sqrt(dt)*rnorm(1)  # exchange rate evolution
       rf[i+1] = rf[i] + kappa.rf*(theta.rf-rf[i])*dt + sigma*sqrt(dt)*rnorm(1)  # rf evolution
-      if (rate[i+1] > strike){
-        indicator = indicator + 1 # triggered is hit, counted by indicator
-      }
+      #if (rate[i+1] > strike){
+        #indicator = indicator + 1 # triggered is hit, counted by indicator
+      #}
     }
     # contract payoff, and trigger count record
-    if (indicator == 0){
+    #if (indicator == 0){
+    if (max(rate) >= strike) {  
       PF[j] <- I * (1 + pr) # not triggered, high rate (pr)
       win.count = win.count + 1
     } else {
@@ -123,25 +127,40 @@ simulate <- function(strike, tenor, graph){
     lines(rf)
   }
   # output
-  simulate = list(mean(PF.d), win.count/trials)
+  if(listout == 1) {
+    simulate = list(mean(PF.d), win.count/trials)
+  } else {
+    simulate = mean(PF.d)
+  }
 }
 
 # for visualization, calculate and plot strike against product price
-counter = 1
+
 strike_to_price <- function(){
+  counter = 1
   for (K in seq(0.8, 1.2, by = 0.01)){
-    PF.mean[counter] = simulate(K,1)[[1]]
+    PF.mean[counter] = simulate(K,1,sigma,0,1)[[1]] #added parameters
     counter = counter + 1
   }
   plot(y = PF.mean, x = seq(0.8, 1.2, by = 0.01), xlab = 'Trigger Rate')
 }
 
 # for visualization, calculate and plot strike against success ratio
-counter = 1
+
 strike_to_ratio <- function(){
+  counter = 1
   for (K in seq(0.8, 1.2, by = 0.01)){
-    ratio[counter] = simulate(K,1)[[2]]
+    ratio[counter] = simulate(K,1,sigma,0,1)[[2]] #added parameters 
     counter = counter + 1
   }
   plot(y = ratio, x = seq(0.8, 1.2, by = 0.01), xlab = 'Trigger Rate')
 }
+
+violatility_to_price <- function(){
+  counter = 1
+  for (sigmaes in seq(0.01, 0.3, by = 0.01)){
+    PF.mean[counter] = simulate(1.02,1,sigmaes,0,1)[[1]]
+    counter = counter + 1
+  }
+  plot(y = PF.mean, x = seq(0.01, 0.3, by = 0.01), xlab = 'Violatility', ylab = 'Price', main="Violatility to Price, 4% depreciation")
+} 
