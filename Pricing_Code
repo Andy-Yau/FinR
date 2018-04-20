@@ -1,42 +1,46 @@
 # FinEng Project
 # FX Capital Guarantee pricing
 # andyyau@connect.hku.hk
+# chching96@connect.hku.hk
 
 ### DOCUMENTATION (code at bottom) ###
 
 
-  #   The exchange rate model adopted is basic Vasicek model
-  #   dr(t) = kappa*(theta - r(t))*dt + sigma*dW(t)
-  #
-  #   Estimation of parameters can be found here:
-  #   http://www.math.ku.dk/~rolf/teaching/mfe04/MathFin.Vasicekestimation.R
-  #   
-  #
-  #   Rates Notations (pr, cd, rf):
-  #
-  #   - participation rate (pr) is the higher rate the buyer can luckily get
-  #   - certificate of deposite rate (cd) is the guaranteed rate if trigger is hit
-  #   - risk-free rate (rf) is assumed to be accessible to all parties (incl. buyers)
-  #
-  #   According to the design, we infer pr > cd > rf 
-  #   (the last inequality might not hold, give rising to variants)
-  #   
-  #
-  #   List of functions:
-  #   1.  [output] <- simulate([strike, tenor, graph])
-  #       Usage: given trigger rate and maturity length, runs MCS and returns mean result
-  #       Graph variable: 1 = exchange rate graph, 2 = risk-free rate graph, otherwise no graph
-  #   2.  strike_to_price()
-  #       Usage: graphs the relationship between P (y-axis) and K (x-axis)
-  #   3.  strike_to_ratio()
-  #       Usage: graphs the relationship between Success Ratio (y-axis) and K (x-axis)
-  #
-  #   Patch History:
-  #   18/4/18 - prototype available on github (Andy)
-  #   19/4/18 - add stochastic process to rf (Andy)
-  #   19/4/18 - modify monte carlo trigger rule, use max instead of counting, bug fixed (Steven)
-  
-  
+#   The exchange rate model adopted is basic Vasicek model
+#   dr(t) = kappa*(theta - r(t))*dt + sigma*dW(t)
+#
+#   Estimation of parameters can be found here:
+#   http://www.math.ku.dk/~rolf/teaching/mfe04/MathFin.Vasicekestimation.R
+#   
+#
+#   Rates Notations (pr, cd, rf):
+#
+#   - participation rate (pr) is the higher rate the buyer can get
+#   - certificate of deposite rate (cd) is the guaranteed rate if trigger is not hit
+#   - risk-free rate (rf) is assumed to be accessible to all parties (incl. buyers)
+#
+#   According to the design, we infer pr > rf > cd 
+#   (the last inequality might not hold, give rising to variants)
+#   
+#
+#   List of functions:
+#   1.  [output] <- simulate([strike, tenor, graph])
+#       Usage: given trigger rate and maturity length, runs MCS and returns mean result
+#       Graph = 1: graphs rate evolution; Graph = 0: no graph wanted
+#   2.  strikeprice(lower, upper)
+#       Usage: use this function to find out the optimal strike price. Provide initial lower and upper bound guess. Suggested to use
+#              strike_to_price() to plot a graph to get a brief idea on strike
+#   3.  strike_to_price()
+#       Usage: graphs the relationship between P (y-axis) and K (x-axis)
+#   4.  strike_to_ratio()
+#       Usage: graphs the relationship between Success Ratio (y-axis) and K (x-axis)
+#   5.  pr_to_strike()
+#       Usage: graphs the relationship between potential return and strike
+#   6.  time_to_strike()
+#       Usage: graphs the relationship between time to maturity and strike
+#   6.  volatility_to_strike()
+#       Usage: graphs the relationship between volatility and strike
+
 ### MAIN CODE ###
 
 library("quantmod")
@@ -45,30 +49,33 @@ PF <- matrix()     # raw payoff vector
 PF.d <- matrix()   # discounted payoff vector
 PF.mean <- matrix()# mean of PF.d
 ratio <- matrix()  # success ratio (= win.count/trials)
-rf <- matrix()     # HK 10Y Gbond yield evolution vector
+rf <- matrix()
 
 # inputs (strike and tenor are to be assigned in the valuation function)
 I <- 100000       # base capital deposit
-pr <- 0.05        # participation rate
-cd <- 0.02        # CD rate (i.e. guaranteed rate)
-dt <- 1/252       # discretized daily on 252 basis
-trials <- 1000    # number of trial runs
+pr <- 0.06        # participation rate
+cd <- 0.005        # CD rate (i.e. guaranteed rate)
+trials <- 500    # number of trial runs
+tenor <- 1    #time to maturity
 
-## data retrieval (seems OANDA has failed) # obs <- getFX("USD/CNY", from = "2018-01-01", auto.assign = FALSE)
-dataset.rate <- read.csv(file="E:/YCH USB/HKU QFin/Year 4/Sem 2/financial engineering/Project/CHF_data.csv", header = TRUE)
-dataset.rf <- read.csv(file="E:/YCH USB/HKU QFin/Year 4/Sem 2/financial engineering/Project/HKRF_data.csv", header = TRUE)
-# USD/CHF data
-data <- dataset.rate[-1,5]
+
+# data retrieval (seems OANDA has failed as it only gets past 180 days data)
+# obs <- getFX("USD/CNY", from = "2018-01-01", auto.assign = FALSE)
+dataset <- read.csv(file="CHF_data.csv", header = TRUE)
+dataset.rf <- read.csv(file="HKRF_data.csv", header = TRUE)
+
+#USD/CHF Data
+data = dataset[-1,5]
 n <- length(data)
-data.lag <- dataset.rate[-n,5]
+data.lag = dataset[-n,5]
+S <- data[n]
+
 # HK 10Y GBond data
 data.rf <- dataset.rf[-1,2]
 n.rf <- length(data.rf)
 data.lag.rf <- dataset.rf[-n.rf,2]
-S <- data[n]
 
-## parameter estimation (exchange rate stochastics)
-  #dr(t) = kappa*(theta - r(t))*dt + sigma*dW(t)
+# parameter estimation (FX mean reverting model)
 b <- (sum(data*data.lag)-sum(data)*sum(data.lag)/n)/(sum(data.lag^2)-(sum(data.lag)^2/n))
 kappa <- -log(b)/dt
 a <- sum(data)/n - b*sum(data.lag)/n
@@ -76,20 +83,24 @@ theta <- a/(1-b)
 sigma <- sqrt(2*kappa*(sum((data-data.lag*b-a)^2)/n)/(1-b^2))
 
 ## parameter estimation (risk-free rate stochastics)
-  #drf(t) = kappa.rf*(theta.rf - rf(t))*dt + sigma.rf*dW(t)
+#drf(t) = kappa.rf*(theta.rf - rf(t))*dt + sigma.rf*dW(t)
 b.rf <- (sum(data.rf*data.lag.rf)-sum(data.rf)*sum(data.lag.rf)/n.rf)/(sum(data.lag.rf^2)-(sum(data.lag.rf)^2/n.rf))
 kappa.rf <- -log(b.rf)/dt
 a.rf <- sum(data.rf)/n.rf - b.rf*sum(data.lag.rf)/n.rf
 theta.rf <- a.rf/(1-b.rf)
 sigma.rf <- sqrt(2*kappa.rf*(sum((data.rf-data.lag.rf*b.rf-a.rf)^2)/n.rf)/(1-b.rf^2))
 
+
 # product valuation function
-simulate <- function(strike, tenor, sigma, graph = 0, listout = 0){ #added more parameters, so to use for option greeks
+simulate <- function(pr, strike, tenor, sigma, kappa, theta, kappa.rf, theta.rf, sigma.rf, graph = 0, listout = 0){ 
   # initialize
-  rate[1] <- data[1] # first rate equals first datum in data
+  dt <- 1/252         # discretized daily on 252 basis
+  set.seed(87)        # for reproduce results
+  rate[1] <- data[n]  # first rate equals spot rate
   rf[1] <- data.rf[1] # first rf equals first datum in data.rf
-  win.count <- 0 # counts how many "wins"
-  loss.count <- 0 # counts how many "losses"
+  win.count <- 0      # counts how many "wins"
+  loss.count <- 0     # counts how many "losses"
+  
   for (j in 1:trials){
     indicator <- 0    # 0 if not hit, 1 if triggered; reset every trial
     rf.int <- 0       # initialize integral of rf
@@ -97,35 +108,31 @@ simulate <- function(strike, tenor, sigma, graph = 0, listout = 0){ #added more 
     for (i in 1 : as.integer(tenor/dt)){
       rf.int <- rf.int + rf[i]*dt                                               # rf integral
       rate[i+1] = rate[i] + kappa*(theta-rate[i])*dt + sigma*sqrt(dt)*rnorm(1)  # exchange rate evolution
-      rf[i+1] = rf[i] + kappa.rf*(theta.rf-rf[i])*dt + sigma*sqrt(dt)*rnorm(1)  # rf evolution
-      #if (rate[i+1] > strike){
-        #indicator = indicator + 1 # triggered is hit, counted by indicator
-      #}
+      rf[i+1] = rf[i] + kappa.rf*(theta.rf-rf[i])*dt + sigma.rf*sqrt(dt)*rnorm(1)  # rf evolution
     }
-    # contract payoff, and trigger count record
-    #if (indicator == 0){
-    if (max(rate) >= strike) {  
-      PF[j] <- I * (1 + pr) # not triggered, high rate (pr)
+    if (max(rate) >= strike) {    #Path dependant
+      PF[j] <- I*exp(pr*tenor)
       win.count = win.count + 1
     } else {
-      PF[j] <- I * (1 + cd) # triggered, guaranteed rate (cd)
+      PF[j] <- I*exp(cd*tenor)
       loss.count = loss.count + 1
     }
-    PF.d[j] = PF[j]*exp(-rf.int) # discounting
+    PF.d[j] = PF[j]*exp(-(rf.int/100)*tenor) # discounting
   }
   # for validation only
   if(win.count + loss.count != trials){
     print("Win and loss do not sum up to total trials.")
     break
   }
+
   # graphing
   if(graph == 1){
-    plot(rate, xlab = 'dt')
+    plot(rate, xlab = 'dt', main='Exchange Rate Simulation')
     lines(rate)
-  } else if (graph == 2){
-    plot(rf, xlab = 'dt')
-    lines(rf)
+    abline(h=theta, col="blue")
+    points(x=0, y=theta)
   }
+  
   # output
   if(listout == 1) {
     simulate = list(mean(PF.d), win.count/trials)
@@ -134,33 +141,72 @@ simulate <- function(strike, tenor, sigma, graph = 0, listout = 0){ #added more 
   }
 }
 
-# for visualization, calculate and plot strike against product price
+#function used for optimize
+searchK <- function(K,sigmaest, prest, ti) {
+  searchK = I - simulate(pr=prest,K,tenor=ti,sigma=sigmaest, kappa,theta,kappa.rf, theta.rf, sigma.rf)  #fair value should be initial investment
+  searchK
+}
 
+#use this function to generate strike price
+strikeprice <- function(lower, upper){
+  print(uniroot(searchK, c(lower, upper), sigmaest=sigma, prest=pr, ti=tenor, tol = 1e-9)$root)
+}
+
+# for visualization, calculate and plot strike against product price
+## change seq if necessary!! ##
 strike_to_price <- function(){
   counter = 1
-  for (K in seq(0.8, 1.2, by = 0.01)){
-    PF.mean[counter] = simulate(K,1,sigma,0,1)[[1]] #added parameters
+  for (K in seq(0.95, 1.1, by = 0.005)){
+    PF.mean[counter] = simulate(pr,K,tenor,sigma,kappa,theta,kappa.rf, theta.rf, sigma.rf,0,1)[[1]]
     counter = counter + 1
   }
-  plot(y = PF.mean, x = seq(0.8, 1.2, by = 0.01), xlab = 'Trigger Rate')
+  plot(y = PF.mean, x = seq(0.95, 1.1, by = 0.005), xlab = 'Trigger Rate', ylab = 'Price', main="Strike to price", type="l")
+  abline(h=I, col="red")
 }
 
 # for visualization, calculate and plot strike against success ratio
-
+## change seq if necessary!! ##
 strike_to_ratio <- function(){
   counter = 1
-  for (K in seq(0.8, 1.2, by = 0.01)){
-    ratio[counter] = simulate(K,1,sigma,0,1)[[2]] #added parameters 
+  for (K in seq(0.95, 1.1, by = 0.005)){
+    ratio[counter] = simulate(pr,K,tenor,sigma,kappa,theta,kappa.rf, theta.rf, sigma.rf,0,1)[[2]]
     counter = counter + 1
   }
-  plot(y = ratio, x = seq(0.8, 1.2, by = 0.01), xlab = 'Trigger Rate')
+  plot(y = ratio, x = seq(0.95, 1.1, by = 0.005), xlab = 'Trigger Rate', main="Strike to Prob. of exercising", type="l")
 }
 
-violatility_to_price <- function(){
-  counter = 1
-  for (sigmaes in seq(0.01, 0.3, by = 0.01)){
-    PF.mean[counter] = simulate(1.02,1,sigmaes,0,1)[[1]]
+# for visualization, calculate and plot the effect of violatility on strike price
+## change seq if necessary!! ##
+volatility_to_price <- function(){
+  striker = matrix()
+  counter=1
+  for (sigmaes in seq(0.01, 0.3, by = 0.05)){
+    striker[counter]=uniroot(searchK, c(0.9,1.3), sigmaest=sigmaes, prest=pr, ti=tenor)$root
     counter = counter + 1
   }
-  plot(y = PF.mean, x = seq(0.01, 0.3, by = 0.01), xlab = 'Violatility', ylab = 'Price', main="Violatility to Price, 4% depreciation")
+  plot(y = striker, x = seq(0.01, 0.3, by = 0.05), xlab = 'Volatility', ylab = 'Strike', main="Strike and Volatility", type = 'l')
+} 
+
+#for visualization, calculate and plot the effect of potential return on strike price
+## change seq if necessary!! ##
+pr_to_strike <- function(){
+  striker = matrix()
+  counter=1
+  for (pres in seq(0.02, 0.1, by = 0.05)){
+    striker[counter]=uniroot(searchK, c(0.9,1.3), sigmaest=sigma, prest=pres, ti=tenor)$root
+    counter = counter + 1
+  }
+  plot(y = striker, x = seq(0.02, 0.1, by = 0.05), xlab = 'Potential Return', ylab = 'Strike', main="Strike and Potential Return", type = 'l')
+} 
+
+#for visualization, calculate and plot the effect of time on strike price
+## change seq if necessary!! ##
+time_to_strike <- function(){
+  striker = matrix()
+  counter=1
+  for (times in seq(0.3, 1.5, by = 0.1)){
+    striker[counter]=uniroot(searchK, c(1.03,1.1), sigmaest=sigma, prest=pr, ti=times)$root
+    counter = counter + 1
+  }
+  plot(y = striker, x = seq(0.3, 1.5, by = 0.1), xlab = 'Time', ylab = 'Strike', main="Strike and Time to maturity", type = 'l')
 } 
